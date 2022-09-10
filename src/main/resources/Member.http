@@ -1,0 +1,7 @@
+### Test
+GET http://localhost:8080/test/auth/info
+Authorization:Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiLsoJXrr7zsmrAiLCJhdXRoIjoiUk9MRV9VU0VSIn0.nuNd3FDt152ovuTIXvAabUm6Rd_fIDSC-4OVx01Ab-I
+accept: */*
+
+
+

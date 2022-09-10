@@ -1,17 +1,28 @@
 package com.sparta.clone.service;
 
+import com.sparta.clone.controller.dto.response.ResponseDto;
+import com.sparta.clone.controller.repo.MemberRepo;
+import com.sparta.clone.entity.Member;
+import com.sparta.clone.security.jwt.JwtTokenProvider;
+import com.sun.security.auth.UserPrincipal;
+import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
+import org.springframework.web.servlet.handler.UserRoleAuthorizationInterceptor;
 
-import java.sql.ClientInfoStatus;
+import javax.servlet.http.HttpServletResponse;
+import java.rmi.MarshalledObject;
 import java.util.Map;
 
 @Service
+@RequiredArgsConstructor
 public class NaverLoginApi {
 
     // https://nid.naver.com/oauth2.0/authorize?client_id=43KVChnXUmyM5z9u7el8&response_type=code&redirect_uri=http://localhost:8080/auth/login&state=123
@@ -32,6 +43,9 @@ public class NaverLoginApi {
     String ClientSecret;
     String temp_state="123";
 
+    private final MemberRepo memberRepo;
+    private final JwtTokenProvider jwtTokenProvider;
+
 
     // 네이버에서 제공하는 로그인창 url
     public String makeLoginUrl(){
@@ -46,8 +60,8 @@ public class NaverLoginApi {
     }
 
 
-    //Naver 로그인후 토큰받기
-    public ResponseEntity<?> getToken(String code,String state){
+    //네이버 로그인후 토큰받기
+    public ResponseDto<?> login(String code, String state, HttpServletResponse response){
         RestTemplate restTemplate =new RestTemplate(); // 토큰을 발급 받을 URL 초기화
         HttpEntity<?> httpentity = new HttpEntity<>(new HttpHeaders());
         ResponseEntity<Map> resultMap = restTemplate.exchange(makeAuthUrl(code,state), HttpMethod.GET,httpentity,Map.class); // GET 방식으로 토큰 발급 요청
@@ -55,17 +69,72 @@ public class NaverLoginApi {
         String NaverRefreshToken=String.valueOf(resultMap.getBody().get("refresh_token"));
         String NaverTokenType=String.valueOf(resultMap.getBody().get("token_type")); // = "Bearer"
         String NaverExpiresIn=String.valueOf(resultMap.getBody().get("expires_in")); // = "3600"
-        return nidMe(NaverAccessToken,NaverTokenType); // Naver에서 제공받은 토큰으로 로그인한 유저정보 조회
+
+        // 정보받기
+        response.addHeader("RefreshToken",NaverRefreshToken);
+        Map userData=nidMe(NaverAccessToken,NaverTokenType);
+        // 받은 정보로 회원테이블 조회 및 신규 회원일시 자동 가입
+        signIn(userData);
+
+        // 로그인한 회원 객체 생성
+
+
+        String id = String.valueOf(userData.get("id"));
+        Member member = memberRepo.findById(id).get();
+
+
+
+        // 토큰생성
+        String accessToken = jwtTokenProvider.creatToken(member);
+
+
+        // 생성된 토큰 해더에 추가
+        response.addHeader("Authorization","Bearer "+accessToken);
+        System.out.println("accesstoken : "+accessToken);
+
+        //
+        String msg = member.getName()+"님 반갑습니다.";
+        return ResponseDto.success(msg);
     }
 
-    public ResponseEntity<?> nidMe(String NaverAccessToken,String NaverTokenType){
+
+    //네이버 로그인 기반 유저 정보 받기
+    public Map nidMe(String NaverAccessToken,String NaverTokenType){
         RestTemplate restTemplate = new RestTemplate(); // 정보를 발급 받을 URL 초기화
         HttpHeaders headers = new HttpHeaders(); // URL에 보낼 헤더 초기화
         String nidMeHeader=NaverTokenType+" "+NaverAccessToken; // 헤더에 토큰 담기
         headers.set("Authorization",nidMeHeader);
         HttpEntity<?> httpEntity = new HttpEntity<>(headers);
-        ResponseEntity<Map> nidMeResponse = restTemplate.exchange(nidMeUrl,HttpMethod.GET,httpEntity,Map.class); // 정보 발급 요청
-        return nidMeResponse;
+        ResponseEntity<Map> userInfo = restTemplate.exchange(nidMeUrl,HttpMethod.GET,httpEntity, Map.class); // 정보 발급 요청
+        Map userData = (Map) userInfo.getBody().get("response");
+        System.out.println(userData.get("id"));
+        return userData;
+    }
+
+    //유저 정보 기반 회원테이블 생성
+    public void signIn(Map userData){
+        String id = String.valueOf(userData.get("id"));
+        String name = String.valueOf(userData.get("name"));
+        int gender=0;
+        if (String.valueOf(userData.get("gender")).equals("M")){
+            gender=1;
+        }
+        if (String.valueOf(userData.get("gender")).equals("F")){
+            gender=2;
+        }
+        int birthyear= Integer.valueOf(String.valueOf(userData.get("birthyear")));
+
+        if(!memberRepo.existsById(id)){
+            Member member = Member.builder()
+                    .id(id)
+                    .name(name)
+                    .gender(gender)
+                    .birthyear(birthyear)
+                    .userRole("ROLE_USER")
+                    .build();
+            memberRepo.save(member);
+        }
+        String msg = name+"님 환영합니다.";
     }
 
 }

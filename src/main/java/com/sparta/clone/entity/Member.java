@@ -16,9 +16,18 @@ import javax.persistence.Id;
 @AllArgsConstructor
 public class Member {
     @Id
-    String id;
+    private String id;
 
     @Column
-    String email;
+    private String name;
+
+    @Column
+    private int gender;
+
+    @Column
+    private int birthyear;
+
+    @Column
+    private String userRole;
 
 }
